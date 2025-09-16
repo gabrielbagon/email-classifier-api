@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Classificador de Emails</title>
+    <style>
+        body {
+            font-family: system-ui, Arial, sans-serif;
+            max-width: 720px;
+            margin: 24px auto;
+            padding: 0 16px
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 12px 0
+        }
+
+        label {
+            font-weight: 600
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 160px
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        button {
+            padding: 10px 16px;
+            border: 0;
+            border-radius: 10px;
+            cursor: pointer
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Classificador de Emails</h1>
+
+    <div class="card">
+        <label for="emailText">Texto do email</label>
+        <textarea id="emailText" placeholder="Cole aqui o conteúdo do email..."></textarea>
+        <div class="row">
+            <div>
+                <label for="file">ou envie um .txt/.pdf</label><br />
+                <input id="file" type="file" accept=".txt,.pdf" />
+            </div>
+            <button id="submit">Classificar</button>
+        </div>
+    </div>
+
+    <div id="result" class="card" style="display:none">
+        <div><b>Categoria:</b> <span id="category"></span></div>
+        <div><b>Confiança:</b> <span id="conf">—</span>
+            <span id="reviewBadge"
+                style="display:none; margin-left:8px; padding:2px 8px; border-radius:8px; background:#ffe6cc;">Precisa
+                de
+                revisão</span>
+        </div>
+        <div><b>Decisão por:</b> <span id="source">—</span></div>
+
+        <div style="margin-top:8px"><b>Campos detectados:</b>
+            <div style="margin:6px 0">
+                <small style="opacity:.8">Você pode ajustar os campos e clicar em “Atualizar resposta”.</small>
+            </div>
+
+            <div class="row">
+                <div>
+                    <label for="inGreet">Saudação</label><br />
+                    <select id="inGreet">
+                        <option value="">(auto)</option>
+                        <option value="olá">Olá</option>
+                        <option value="bom dia">Bom dia</option>
+                        <option value="boa tarde">Boa tarde</option>
+                        <option value="boa noite">Boa noite</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="inName">Nome</label><br />
+                    <input id="inName" type="text" placeholder="Ex.: Gabriel" />
+                </div>
+
+                <div>
+                    <label for="inTicket">Protocolo/Chamado</label><br />
+                    <input id="inTicket" type="text" placeholder="Ex.: 12345 ou ABC-123" />
+                </div>
+
+                <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
+                    <input id="inAttach" type="checkbox" />
+                    <label for="inAttach">Tem anexo</label>
+                </div>
+
+                <button id="recomposeBtn" style="height:36px">Atualizar resposta</button>
+            </div>
+
+            <div style="margin-top:6px">
+                Saudação: <span id="entGreet">—</span> |
+                Nome: <span id="entName">—</span> |
+                Protocolo: <span id="entTicket">—</span> |
+                Anexo: <span id="entAttach">—</span>
+            </div>
+        </div>
+
+
+        <div style="margin-top:12px">
+            <b>Resposta sugerida:</b>
+            <button id="copyBtn" style="margin-left:8px">Copiar resposta</button>
+        </div>
+        <pre id="reply" style="white-space:pre-wrap"></pre>
+
+        <hr />
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:end">
+            <div>
+                <label for="catSel">Ajustar categoria</label><br />
+                <select id="catSel">
+                    <option value="Produtivo">Produtivo</option>
+                    <option value="Improdutivo">Improdutivo</option>
+                </select>
+            </div>
+            <div>
+                <label for="subtypeSel">Subtipo</label><br />
+                <select id="subtypeSel">
+                    <option value="status_request">status_request</option>
+                    <option value="support_request">support_request</option>
+                    <option value="attachment_share">attachment_share</option>
+                    <option value="general_question">general_question</option>
+                    <option value="greetings_or_thanks">greetings_or_thanks</option>
+                </select>
+            </div>
+            <button id="sendFeedback">Enviar feedback</button>
+        </div>
+
+        <details style="margin-top:8px">
+            <summary>Como cheguei nisso</summary>
+            <pre id="why" style="white-space:pre-wrap"></pre>
+        </details>
+    </div>
+    <div class="card">
+        <h2 style="margin:0 0 8px 0">Métricas & Dataset</h2>
+        <div class="row" style="align-items:flex-end">
+            <div>
+                <label for="ratioInput">Proporção de holdout</label><br />
+                <input id="ratioInput" type="number" min="0.05" max="0.9" step="0.05" value="0.2" style="width:100px" />
+            </div>
+            <button id="trainBtn">Re-treinar modelo</button>
+            <button id="evalBtn">Avaliar modelo</button>
+            <a id="csvLink" href="/dataset/csv" download style="text-decoration:none">
+                <button type="button">Baixar CSV</button>
+            </a>
+        </div>
+
+        <div id="modelStatus" style="margin-top:8px;opacity:.85"></div>
+        <pre id="evalOut" style="white-space:pre-wrap;margin-top:8px"></pre>
+    </div>
+
+
+
+    <script>
+        const el = (id) => document.getElementById(id);
+        let lastInputText = '';   // mantém o texto do email para feedback
+        let lastResult = null;    // mantém o resultado do /classify
+        el('recomposeBtn').onclick = async () => {
+            // Lê categoria/subtipo atuais (podem ter sido ajustados pelo usuário)
+            const category = el('catSel').value;
+            const subtype = el('subtypeSel').value;
+
+            // Monta entidades a partir dos inputs
+            const entities = {
+                greeting: el('inGreet').value || null,          // manter lower-case; server capitaliza
+                name: el('inName').value.trim() || null,
+                ticket_id: el('inTicket').value.trim() || null,
+                has_attachment: !!el('inAttach').checked
+            };
+
+            // Chama /compose para recompor o template no servidor
+            const res = await fetch('/compose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    category,
+                    subtype,
+                    entities,
+                    confidence: lastResult?.confidence ?? 0.75
+                })
+            });
+            const out = await res.json();
+            if (out.error) {
+                alert('Falha ao atualizar resposta: ' + out.error);
+                return;
+            }
+
+            // Atualiza a resposta e os spans de leitura
+            el('reply').textContent = out.suggested_reply || '(sem sugestão)';
+            el('entGreet').textContent = entities.greeting || '—';
+            el('entName').textContent = entities.name || '—';
+            el('entTicket').textContent = entities.ticket_id || '—';
+            el('entAttach').textContent = entities.has_attachment ? 'Sim' : 'Não';
+
+            // Guarda no lastResult para feedback coerente
+            lastResult = {
+                ...(lastResult || {}),
+                category,
+                subtype,
+                suggested_reply: out.suggested_reply,
+                entities
+            };
+        };
+
+
+        el('submit').onclick = async () => {
+            const fd = new FormData();
+            const text = el('emailText').value.trim();
+            const file = el('file').files[0];
+            if (text) fd.append('text', text);
+            if (file) fd.append('file', file);
+            lastInputText = text; // se veio de arquivo, fica vazio — ok
+
+            const res = await fetch('/classify', { method: 'POST', body: fd });
+            const data = await res.json();
+            lastResult = data;
+
+            el('category').textContent = data.category + (data.subtype ? ` (${data.subtype})` : '');
+            el('conf').textContent = data.confidence != null ? `${Math.round(data.confidence * 100)}%` : '—';
+            el('reply').textContent = data.suggested_reply || '(sem sugestão)';
+            el('why').textContent = data.reasoning || '';
+            // Preenche os inputs com as entidades detectadas
+            const ents = data.entities || {};
+            el('inGreet').value = ents.greeting || '';
+            el('inName').value = ents.name || '';
+            el('inTicket').value = ents.ticket_id || '';
+            el('inAttach').checked = !!ents.has_attachment;
+
+            // Reflete os valores também nos spans de leitura
+            el('entGreet').textContent = ents.greeting || '—';
+            el('entName').textContent = ents.name || '—';
+            el('entTicket').textContent = ents.ticket_id || '—';
+            el('entAttach').textContent = ents.has_attachment ? 'Sim' : 'Não';
+
+            el('result').style.display = 'block';
+            el('source').textContent = (data.decision_source === 'ml') ? 'ML' : 'Regras';
+
+
+            // cor de confiança + badge
+            el('conf').style.color = (data.confidence < 0.6) ? 'orange' : 'inherit';
+            el('reviewBadge').style.display = (data.needs_review ? 'inline-block' : 'none');
+
+            // pré-seleciona categoria/subtipo
+            el('catSel').value = data.category || 'Produtivo';
+            el('subtypeSel').value = data.subtype || (data.category === 'Improdutivo' ? 'greetings_or_thanks' : 'general_question');
+
+            // copiar
+            const btn = el('copyBtn');
+            btn.onclick = async () => {
+                try {
+                    await navigator.clipboard.writeText(el('reply').textContent);
+                    btn.textContent = 'Copiado!';
+                    setTimeout(() => btn.textContent = 'Copiar resposta', 1200);
+                } catch { btn.textContent = 'Falhou :('; setTimeout(() => btn.textContent = 'Copiar resposta', 1200); }
+            };
+        };
+
+        el('sendFeedback').onclick = async () => {
+            const chosen_category = el('catSel').value;
+            const chosen_subtype = el('subtypeSel').value;
+
+            // Se o usuário mandou arquivo (sem texto na textarea), pedimos rapidamente que cole um trecho:
+            let textForFeedback = lastInputText;
+            if (!textForFeedback) {
+                textForFeedback = prompt('Cole um trecho representativo do email para registrar o feedback (PII será removida):') || '';
+            }
+            if (!textForFeedback.trim()) {
+                alert('Feedback não enviado: texto vazio.');
+                return;
+            }
+
+            const payload = {
+                text: textForFeedback,
+                chosen_category,
+                chosen_subtype,
+                original_category: lastResult?.category,
+                original_subtype: lastResult?.subtype,
+                confidence: lastResult?.confidence
+            };
+
+            const res = await fetch('/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const out = await res.json();
+            if (out.ok) {
+                alert('Feedback registrado. Obrigado!');
+            } else {
+                alert('Falha ao registrar feedback: ' + (out.error || 'erro desconhecido'));
+            }
+        };
+        // --- Métricas & Dataset ---
+        async function refreshModelStatus() {
+            try {
+                const res = await fetch('/model/status');
+                const st = await res.json();
+                el('modelStatus').textContent =
+                    `Modelo: ${st.available ? 'disponível ✅' : 'indisponível ❌'}`
+                    + (st.trainedOn && st.trainedOn > 0 ? ` | exemplos: ${st.trainedOn}` : '')
+                    + (st.updatedAt ? ` | atualizado: ${st.updatedAt}` : '');
+            } catch {
+                el('modelStatus').textContent = 'Não foi possível obter o status do modelo.';
+            }
+        }
+
+        function formatCM(cm) {
+            // cm = { Produtivo: { Produtivo, Improdutivo }, Improdutivo: { Produtivo, Improdutivo } }
+            const p_p = cm?.Produtivo?.Produtivo ?? 0;
+            const p_i = cm?.Produtivo?.Improdutivo ?? 0;
+            const i_p = cm?.Improdutivo?.Produtivo ?? 0;
+            const i_i = cm?.Improdutivo?.Improdutivo ?? 0;
+            return [
+                'Matriz de confusão (linhas=verdadeiro, colunas=previsto)',
+                '                Pred Produtivo   Pred Improdutivo',
+                `True Produtivo      ${String(p_p).padStart(3)}               ${String(p_i).padStart(3)}`,
+                `True Improdutivo    ${String(i_p).padStart(3)}               ${String(i_i).padStart(3)}`
+            ].join('\n');
+        }
+
+        el('trainBtn').onclick = async () => {
+            el('evalOut').textContent = 'Treinando modelo...';
+            try {
+                const res = await fetch('/model/train', { method: 'POST' });
+                const out = await res.json();
+                if (!out.ok) throw new Error(out.error || 'Falha ao treinar.');
+                el('evalOut').textContent =
+                    `Treino concluído.\nExemplos usados: ${out.trainedOn}\nDisponível: ${out.available ? 'sim' : 'não'}`;
+                refreshModelStatus();
+            } catch (e) {
+                el('evalOut').textContent = 'Erro no treino: ' + (e.message || e);
+            }
+        };
+
+        el('evalBtn').onclick = async () => {
+            const ratio = Math.max(0.05, Math.min(0.9, parseFloat(el('ratioInput').value) || 0.2));
+            el('evalOut').textContent = `Avaliando com holdout=${ratio}...`;
+            try {
+                const res = await fetch(`/model/eval?ratio=${encodeURIComponent(ratio)}`);
+                const out = await res.json();
+                if (!out.ok) {
+                    el('evalOut').textContent = 'Avaliação indisponível: ' + (out.error || 'dados insuficientes');
+                    return;
+                }
+                el('evalOut').textContent =
+                    `Acurácia: ${(out.accuracy * 100).toFixed(1)}% (treino=${out.n_train}, teste=${out.n_test})\n\n`
+                    + formatCM(out.confusion_matrix);
+            } catch (e) {
+                el('evalOut').textContent = 'Erro na avaliação: ' + (e.message || e);
+            }
+        };
+
+        // atualiza status ao carregar a página
+        refreshModelStatus();
+
+    </script>
+
+</body>
+
+</html>
